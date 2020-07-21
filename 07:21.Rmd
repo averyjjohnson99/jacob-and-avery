@@ -179,7 +179,7 @@ complete3 = left_join(complete2, dailytemp, by = c('Plot_ID', 'date.collection')
 ```{r}
 #ideal gas law to get n
 complete3 = complete3 %>%
-  mutate(molc02= (101325*complete3$bucket)/(8.314*complete3$Kelvin))
+  mutate(molc02= (complete3$bucket)/(.08205*complete3$Kelvin))
 ```
 
 ```{r}
@@ -193,11 +193,11 @@ complete3 = complete3 %>%
 ```{r}
 #separating by time
 time1 = subset(complete3, subset = complete3$Time ==0) %>%
-  select(date.collection, Plot_ID,`treatment type`, bucket, grams_m2)
+  select(date.collection, Plot_ID,`treatment type`, bucket, grams_m2, Time)
 time2 = subset(complete3, subset = complete3$Time > 0 & complete3$Time < 80) %>%
-  select(date.collection, Plot_ID, `treatment type`, bucket, grams_m2)
+  select(date.collection, Plot_ID, `treatment type`, bucket, grams_m2, Time)
 time3 = subset(complete3, subset = complete3$Time > 100) %>%
-  select(date.collection, Plot_ID,`treatment type`,  bucket, grams_m2)
+  select(date.collection, Plot_ID,`treatment type`,  bucket, grams_m2, Time)
 ```
 
 ```{r}
@@ -205,13 +205,21 @@ time3 = subset(complete3, subset = complete3$Time > 100) %>%
 timenew = left_join(time1, time2, by = c("date.collection","bucket","treatment type", "Plot_ID"))
 
 completeflux = left_join(timenew, time3, by = c("date.collection","bucket","treatment type", "Plot_ID")) %>%
-  rename( "time1" = "grams_m2.x", "time2" = "grams_m2.y", "time3" = "grams_m2" )
+  rename( "gCO2_1" = "grams_m2.x", "gCO2_2" = "grams_m2.y", "gCO2_3" = "grams_m2", "time1" = "Time.x", "time2" = "Time.y", "time3" = Time ) 
+```
+
+```{r}
+completeflux = completeflux %>%
+  mutate(CO2_Rate = (gCO2_3 - gCO2_1)/time3) %>%
+  filter(completeflux$Plot_ID != "alt")
 ```
 
 ```{r}
 #ggplot
 
-ggplot(data = completeflux, aes( x = date.collection, y = time3, color = `treatment type`)) + geom_point() +
+ggplot(data = completeflux, aes( x = date.collection, y = CO2_Rate, color = `treatment type`)) + geom_point() +
   facet_wrap(.~ Plot_ID)
+
+#adding text
 ```
 
