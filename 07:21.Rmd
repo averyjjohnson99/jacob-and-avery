@@ -1,0 +1,217 @@
+---
+output: html_document
+---
+
+
+```{r}
+#subsetting CO2 standards into different measurements
+mVsubset = subset(CO2_standards, subset = is.na(CO2_standards$`co2mmol/mol`))
+
+mmolsubset = subset(CO2_standards, subset = is.na(CO2_standards$co2mV))
+```
+
+```{r}
+library(tidyverse)
+#linear curves for mV data
+mVsubset = mVsubset %>%
+nest(-date) %>%
+  mutate(fit = map(data, ~lm(`std ppm`~co2mV, data = .)),
+         results = map(fit, generics::tidy)) %>%
+  unnest(results)
+
+```
+
+```{r}
+#linear curves for mmol data 
+mmolsubset = mmolsubset %>%
+  nest(-date) %>%
+  mutate(fit = map(data, ~lm(`std ppm`~`co2mmol/mol`, data = .)),
+         results = map(fit, generics::tidy)) %>%
+  unnest(results)
+
+```
+
+```{r}
+#filtering slopes and intercepts
+
+mVIntercept = subset(mVsubset, subset = mVsubset$term == "(Intercept)")
+
+mVSlope = subset(mVsubset, subset = mVsubset$term == "co2mV")
+
+mmolIntercept = subset(mmolsubset, subset = mmolsubset$term == "(Intercept)")
+
+mmolSlope = subset(mmolsubset, subset = mmolsubset$term == "`co2mmol/mol`")
+
+```
+
+```{r}
+# creating slope/intercept tibble functions (mV data)
+
+a = mVIntercept$date
+b = mVIntercept$estimate
+c = mVSlope$estimate
+
+mVdata = tibble(a,b,c)
+```
+
+```{r}
+# creating slope/intercept tibble function (mmol data)
+
+d = mmolIntercept$date
+e = mmolIntercept$estimate
+f = mmolSlope$estimate
+
+mmoldata = tibble(d,e,f)
+```
+
+```{r}
+#subsetting co2 data by measurement type
+datasetmV = subset(CO2, subset = !is.na(CO2$`peak heights (mV)`))
+
+datasetmmol = subset(CO2, subset = is.na(CO2$`peak heights (mV)`))
+```
+
+```{r}
+#cleaning up data
+datasetmV = datasetmV %>%
+  rename("date" = "date analysis")
+
+datasetmmol = datasetmmol %>%
+  rename("date" = "date analysis")
+```
+
+```{r}
+#date lubridation of CO2 data
+
+datasetmV = datasetmV %>%
+  mutate(date = lubridate::mdy(date))
+
+datasetmmol = datasetmmol %>%
+  mutate(date = lubridate::mdy(date))
+```
+
+```{r}
+#renaming columns
+mVdata = mVdata %>%
+  rename("date" = "a", "intercept" = "b", "slope" = "c") %>%
+  mutate(date = lubridate::mdy(date))
+
+mmoldata = mmoldata %>%
+  rename("date" = "d", "intercept" = "e", "slope" = "f") %>%
+  mutate(date = lubridate::mdy(date))
+```
+
+```{r}
+#joining by date
+
+finalmV = left_join(datasetmV, mVdata, by="date")
+
+finalmmol = left_join(datasetmmol, mmoldata, by="date")
+```
+
+```{r}
+#computing ppm 
+finalmV= finalmV %>%
+  mutate(ppm = (finalmV$`peak heights (mV)`* finalmV$slope + finalmV$intercept))
+
+finalmmol = finalmmol %>%
+  mutate(ppm = (finalmmol$`peak heights (um/m)`* finalmmol$slope + finalmmol$intercept))
+```
+
+```{r}
+#joining the two measurements
+complete = rbind(finalmV,finalmmol)
+```
+
+```{r} 
+#cleaning complete dataset
+complete = complete %>%
+  select(-component, -`peak heights (mV)`, -`peak heights (um/m)`, -`QC(Y/N)`, -standard_type, -standard_ppm, -`field temp (kelvin)`, -`pressure (atm)`, -slope, -intercept)
+```
+
+```{r}
+#adding bucket volume/area data
+complete2 = left_join(complete, buckets, by = "bucket")
+
+```
+
+```{r}
+#pivoting daily highs & lubridating
+dailytemp = pivot_longer(dailyhighs, cols = -c(OBJECTID, Plot_ID, Treatment, ORIG_FID)) %>%
+  mutate(date = str_remove(name, "high")) %>%
+  select(-name) %>% 
+  mutate(date = lubridate::ymd(date)) %>%
+  filter(Treatment == "T")
+
+```
+
+```{r}
+#dailytemps converted to Kelvin
+dailytemp = dailytemp %>%
+  mutate(Kelvin = value + 273.15) %>%
+  rename(date.collection = date) 
+```
+
+```{r}
+#matching column titles before joining temperature data
+complete2 = complete2 %>%
+  rename(Plot_ID = `site id`, date = `date collection`, date.analyzed = date)
+```
+
+```{r}
+#lubridating date collection for Complete2
+complete2 = complete2 %>%
+  mutate(date = lubridate::mdy(date)) %>%
+  rename(date.collection = date)
+```
+
+```{r}
+#selecting dailytemp columns
+dailytemp = dailytemp %>%
+  select(date.collection, Plot_ID, Kelvin)
+```
+
+```{r}
+#joining temperature data
+complete3 = left_join(complete2, dailytemp, by = c('Plot_ID', 'date.collection'))
+```
+
+```{r}
+#ideal gas law to get n
+complete3 = complete3 %>%
+  mutate(molc02= (101325*complete3$bucket)/(8.314*complete3$Kelvin))
+```
+
+```{r}
+#from moles CO2 to grams CO2/m2
+complete3 = complete3 %>%
+  mutate(concentrationCO2 = (complete3$ppm * complete3$molc02 * 10^-6)) %>%
+  mutate(gramCO2 = concentrationCO2 *44.01) %>%
+  mutate(grams_m2 = gramCO2/area)
+```
+
+```{r}
+#separating by time
+time1 = subset(complete3, subset = complete3$Time ==0) %>%
+  select(date.collection, Plot_ID,`treatment type`, bucket, grams_m2)
+time2 = subset(complete3, subset = complete3$Time > 0 & complete3$Time < 80) %>%
+  select(date.collection, Plot_ID, `treatment type`, bucket, grams_m2)
+time3 = subset(complete3, subset = complete3$Time > 100) %>%
+  select(date.collection, Plot_ID,`treatment type`,  bucket, grams_m2)
+```
+
+```{r}
+#adding times back together
+timenew = left_join(time1, time2, by = c("date.collection","bucket","treatment type", "Plot_ID"))
+
+completeflux = left_join(timenew, time3, by = c("date.collection","bucket","treatment type", "Plot_ID")) %>%
+  rename( "time1" = "grams_m2.x", "time2" = "grams_m2.y", "time3" = "grams_m2" )
+```
+
+```{r}
+#ggplot
+
+ggplot(data = completeflux, aes( x = date.collection, y = time3, color = `treatment type`)) + geom_point() +
+  facet_wrap(.~ Plot_ID)
+```
+
