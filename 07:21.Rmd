@@ -217,9 +217,9 @@ completeflux = completeflux %>%
 ```{r}
 #ggplot
 
-ggplot(data = completeflux, aes( x = date.collection, y = CO2_Rate, color = `treatment type`)) + geom_point() +
+ggplot(data = completeflux, aes( x = date.collection, y = CO2_Rate, color = `treatment type`)) + geom_boxplot() +
   facet_wrap(.~ Plot_ID)
 
-#adding text
+
 ```
 
